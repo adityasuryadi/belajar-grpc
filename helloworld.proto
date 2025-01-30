@@ -1,0 +1,26 @@
+syntax = "proto3";
+// versi proto buff nya
+
+// nama package untuk scope 
+// tidak bisa membuat service dengan nama yang sama di dalam satu package tidak bisa,karena conflict
+package helloworld;
+
+//  jika pakai golang,/proto artinya di module ini akan buat folder proto
+option go_package = "/proto";
+
+//  untuk mengelompokan beberapa rpc
+//  sayHello merupakan fungsi
+//  helllorequest merupakan paramter helloreply merupkan return
+service Greater {
+    rpc SayHello (HelloRequest) returns (HelloReply);
+}
+
+//  request yang berisi field2 tipe data
+//  number harus unik,karena merupakan urutan serialize dan deserialize
+message HelloRequest {
+    string name = 1;
+}
+
+message HelloReply {
+    string message = 1;
+}
