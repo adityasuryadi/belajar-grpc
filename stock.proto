@@ -1,37 +1,45 @@
 syntax = "proto3";
 
 package stock;
-option go_package = "./proto" ;
-  
+
+option go_package = "./proto";
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
+
 service StockService {
-    rpc ListStocks (google.protobuf.Empty) returns (StockCodes);
-    rpc ToggleStocks (stream StockSubscription) returns (StockCodes);
-    rpc ListSubscriptions (google.protobuf.Empty) returns (StockCodes);
-    rpc LiveStock (stream StockSubscription) returns (StockCodes);
+  // Unary API: Get list of available stock codes
+  rpc ListStocks (google.protobuf.Empty) returns (StockCodes);
+
+  // Client Streaming: Enable/disable stock availability
+  rpc ToggleStocks (stream StockSubscription) returns (StockCodes);
+
+  // Server Streaming: Get list of currently subscribed stocks
+  rpc ListSubscriptions (google.protobuf.Empty) returns (stream StockCode);
+
+  // Bidirectional Streaming: Live stock price subscription
+  rpc LiveStock (stream StockSubscription) returns (stream StockPrices);
 }
 
 message StockCode {
-    string stock_code = 1;
+  string stock_code = 1;
 }
 
 message StockCodes {
-    repeated string stock_codes=1;
+  repeated string stock_codes = 1;
 }
 
 message StockSubscription {
-    string stock_code = 1;
-    bool is_enabled = 2;
+  string stock_code = 1;
+  bool is_enabled = 2;
 }
 
 message StockPrices {
-    map<string,StockPrice> stock_prices = 1;
+    map<string, StockPrice> stock_prices = 1;
 }
 
 message StockPrice {
-    int64 ptice = 1;
-    google.protobuf.Timestamp timestamp = 2;
+    int64 price = 1;
+    google.protobuf.Timestamp timestamp = 2;  
 }

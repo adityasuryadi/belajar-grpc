@@ -30,10 +30,14 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StockServiceClient interface {
+	// Unary API: Get list of available stock codes
 	ListStocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StockCodes, error)
+	// Client Streaming: Enable/disable stock availability
 	ToggleStocks(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StockSubscription, StockCodes], error)
-	ListSubscriptions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StockCodes, error)
-	LiveStock(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StockSubscription, StockCodes], error)
+	// Server Streaming: Get list of currently subscribed stocks
+	ListSubscriptions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StockCode], error)
+	// Bidirectional Streaming: Live stock price subscription
+	LiveStock(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StockSubscription, StockPrices], error)
 }
 
 type stockServiceClient struct {
@@ -67,37 +71,50 @@ func (c *stockServiceClient) ToggleStocks(ctx context.Context, opts ...grpc.Call
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StockService_ToggleStocksClient = grpc.ClientStreamingClient[StockSubscription, StockCodes]
 
-func (c *stockServiceClient) ListSubscriptions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StockCodes, error) {
+func (c *stockServiceClient) ListSubscriptions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StockCode], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StockCodes)
-	err := c.cc.Invoke(ctx, StockService_ListSubscriptions_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &StockService_ServiceDesc.Streams[1], StockService_ListSubscriptions_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
-}
-
-func (c *stockServiceClient) LiveStock(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StockSubscription, StockCodes], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &StockService_ServiceDesc.Streams[1], StockService_LiveStock_FullMethodName, cOpts...)
-	if err != nil {
+	x := &grpc.GenericClientStream[emptypb.Empty, StockCode]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[StockSubscription, StockCodes]{ClientStream: stream}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type StockService_LiveStockClient = grpc.ClientStreamingClient[StockSubscription, StockCodes]
+type StockService_ListSubscriptionsClient = grpc.ServerStreamingClient[StockCode]
+
+func (c *stockServiceClient) LiveStock(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StockSubscription, StockPrices], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &StockService_ServiceDesc.Streams[2], StockService_LiveStock_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StockSubscription, StockPrices]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type StockService_LiveStockClient = grpc.BidiStreamingClient[StockSubscription, StockPrices]
 
 // StockServiceServer is the server API for StockService service.
 // All implementations must embed UnimplementedStockServiceServer
 // for forward compatibility.
 type StockServiceServer interface {
+	// Unary API: Get list of available stock codes
 	ListStocks(context.Context, *emptypb.Empty) (*StockCodes, error)
+	// Client Streaming: Enable/disable stock availability
 	ToggleStocks(grpc.ClientStreamingServer[StockSubscription, StockCodes]) error
-	ListSubscriptions(context.Context, *emptypb.Empty) (*StockCodes, error)
-	LiveStock(grpc.ClientStreamingServer[StockSubscription, StockCodes]) error
+	// Server Streaming: Get list of currently subscribed stocks
+	ListSubscriptions(*emptypb.Empty, grpc.ServerStreamingServer[StockCode]) error
+	// Bidirectional Streaming: Live stock price subscription
+	LiveStock(grpc.BidiStreamingServer[StockSubscription, StockPrices]) error
 	mustEmbedUnimplementedStockServiceServer()
 }
 
@@ -114,10 +131,10 @@ func (UnimplementedStockServiceServer) ListStocks(context.Context, *emptypb.Empt
 func (UnimplementedStockServiceServer) ToggleStocks(grpc.ClientStreamingServer[StockSubscription, StockCodes]) error {
 	return status.Errorf(codes.Unimplemented, "method ToggleStocks not implemented")
 }
-func (UnimplementedStockServiceServer) ListSubscriptions(context.Context, *emptypb.Empty) (*StockCodes, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListSubscriptions not implemented")
+func (UnimplementedStockServiceServer) ListSubscriptions(*emptypb.Empty, grpc.ServerStreamingServer[StockCode]) error {
+	return status.Errorf(codes.Unimplemented, "method ListSubscriptions not implemented")
 }
-func (UnimplementedStockServiceServer) LiveStock(grpc.ClientStreamingServer[StockSubscription, StockCodes]) error {
+func (UnimplementedStockServiceServer) LiveStock(grpc.BidiStreamingServer[StockSubscription, StockPrices]) error {
 	return status.Errorf(codes.Unimplemented, "method LiveStock not implemented")
 }
 func (UnimplementedStockServiceServer) mustEmbedUnimplementedStockServiceServer() {}
@@ -166,30 +183,23 @@ func _StockService_ToggleStocks_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StockService_ToggleStocksServer = grpc.ClientStreamingServer[StockSubscription, StockCodes]
 
-func _StockService_ListSubscriptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
+func _StockService_ListSubscriptions_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(StockServiceServer).ListSubscriptions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: StockService_ListSubscriptions_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StockServiceServer).ListSubscriptions(ctx, req.(*emptypb.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _StockService_LiveStock_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(StockServiceServer).LiveStock(&grpc.GenericServerStream[StockSubscription, StockCodes]{ServerStream: stream})
+	return srv.(StockServiceServer).ListSubscriptions(m, &grpc.GenericServerStream[emptypb.Empty, StockCode]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type StockService_LiveStockServer = grpc.ClientStreamingServer[StockSubscription, StockCodes]
+type StockService_ListSubscriptionsServer = grpc.ServerStreamingServer[StockCode]
+
+func _StockService_LiveStock_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StockServiceServer).LiveStock(&grpc.GenericServerStream[StockSubscription, StockPrices]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type StockService_LiveStockServer = grpc.BidiStreamingServer[StockSubscription, StockPrices]
 
 // StockService_ServiceDesc is the grpc.ServiceDesc for StockService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -202,10 +212,6 @@ var StockService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListStocks",
 			Handler:    _StockService_ListStocks_Handler,
 		},
-		{
-			MethodName: "ListSubscriptions",
-			Handler:    _StockService_ListSubscriptions_Handler,
-		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -214,8 +220,14 @@ var StockService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 		{
+			StreamName:    "ListSubscriptions",
+			Handler:       _StockService_ListSubscriptions_Handler,
+			ServerStreams: true,
+		},
+		{
 			StreamName:    "LiveStock",
 			Handler:       _StockService_LiveStock_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 	},
